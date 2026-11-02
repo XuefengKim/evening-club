@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: evening-club
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /_health
+    autoDeployTrigger: off
+    envVars:
+      - key: PORT
+        value: "10000"

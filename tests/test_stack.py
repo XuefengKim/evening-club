@@ -80,7 +80,7 @@ async def protocols(port):
 
 def main():
     port=choose_port()
-    p=subprocess.Popen([sys.executable,str(ROOT/'start.py'),'--port',str(port),'--bind','127.0.0.1'],cwd=ROOT,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
+    p=subprocess.Popen([sys.executable,str(ROOT/'start.py'),'--bind','127.0.0.1'],env=dict(os.environ,PORT=str(port)),cwd=ROOT,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
     try:
         for _ in range(160):
             if p.poll() is not None:raise AssertionError(p.stdout.read())
@@ -101,7 +101,7 @@ def main():
         print('PASS all 17 games reachable on one origin; runtime/source files hidden')
     finally:
         if p.poll() is None:
-            p.send_signal(signal.SIGINT)
+            p.send_signal(signal.SIGTERM)
         try:p.wait(timeout=10)
         except subprocess.TimeoutExpired:p.kill();p.wait();raise
         if p.stdout:p.stdout.close()

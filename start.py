@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -25,7 +26,7 @@ def lan_address():
 
 def run():
     parser = argparse.ArgumentParser(description='Tonight Club: 17 LAN browser games')
-    parser.add_argument('--port', type=int, default=8780, help='Main port; reserves this port and the next 9')
+    parser.add_argument('--port', type=int, default=os.environ.get('PORT', '8780'), help='Main port (defaults to PORT or 8780); reserves this port and the next 9')
     parser.add_argument('--bind', default='0.0.0.0', help='Gateway address; use 127.0.0.1 for local-only')
     args = parser.parse_args()
     if not 1024 <= args.port <= 65526:
@@ -70,6 +71,9 @@ def run():
                 return
             time.sleep(.05)
         raise RuntimeError(f'{name} did not become ready; inspect .data/{name}.log')
+    def stop_on_signal(signum, frame):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, stop_on_signal)
     try:
         for name, folder, http, ws in services:
             local = dict(env, ARCADE_HTTP_PORT=str(http), ARCADE_WS_PORT=str(ws))
