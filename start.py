@@ -64,13 +64,20 @@ def run():
         children.append(p)
         return p
     def ready(p, ports, name):
-        for _ in range(100):
+        # Shared cloud CPUs may take substantially longer than a desktop to boot.
+        deadline = time.monotonic() + 90
+        def failed(message):
+            log_path = data/f'{name}.log'
+            if log_path.exists():
+                print(log_path.read_text(encoding='utf-8', errors='replace')[-8000:], file=sys.stderr, flush=True)
+            raise RuntimeError(message)
+        while time.monotonic() < deadline:
             if p.poll() is not None:
-                raise RuntimeError(f'{name} stopped; inspect .data/{name}.log')
+                failed(f'{name} stopped; inspect .data/{name}.log')
             if all(listening(port) for port in ports):
                 return
             time.sleep(.05)
-        raise RuntimeError(f'{name} did not become ready; inspect .data/{name}.log')
+        failed(f'{name} did not become ready after 90 seconds; inspect .data/{name}.log')
     def stop_on_signal(signum, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, stop_on_signal)
