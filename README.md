@@ -1,2 +1,90 @@
-# evening-club
-今晚俱乐部：17 款浏览器联机游戏，包含 UNO、15 款桌面对弈与纸牌，以及原创双人协作冒险《星港维修队》。
+# 今晚俱乐部 · Tonight Club
+
+17 款适合朋友一起玩的浏览器小游戏：桌面对弈、纸牌，以及原创双人平台冒险《星港维修队》。一台电脑运行服务，同一 Wi-Fi 下的手机或电脑打开同一个网址即可进入。
+
+## 游戏清单
+
+| 分区 | 游戏 | 数量 |
+| --- | --- | ---: |
+| 经典小游戏 | 四子连线、翻牌配对、骰子冒险、猜拳对决、数字拆弹、点格围城 | 6 |
+| 扩展小游戏 | 井字棋、五子棋、黑白棋、拿石子、Hex 连线抢地、暗码对决 | 6 |
+| 纸牌 | 疯狂八点、宫殿牌、六张高尔夫 | 3 |
+| UNO | 带页面规则说明的 UNO 风格牌桌，支持人机 | 1 |
+| 协作冒险 | 星港维修队：8 个递进关卡、磁力搬运、二段跳、时间脉冲 | 1 |
+
+各游戏的规则和简化设定以页面内说明为准。桌面对弈和纸牌支持真人或人机；《星港维修队》需要两台设备分别控制两位角色。
+
+## 安装与启动
+
+需要 **Python 3.10+、Node.js 22+ 和 npm**。下载或克隆仓库后，在仓库目录运行。
+
+macOS / Linux：
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+npm --prefix apps/starport ci
+.venv/bin/python start.py
+```
+
+Windows PowerShell：
+
+```powershell
+py -3 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+npm --prefix apps/starport ci
+.venv\Scripts\python.exe start.py
+```
+
+启动后，终端会显示本机地址和局域网地址。两台设备连接同一 Wi-Fi，打开终端打印的局域网网址，在大厅选择同一款游戏。默认入口为 `http://localhost:8780/`。
+
+- 电脑需要保持开机，运行游戏的终端需保持打开；按 `Ctrl+C` 停止本次启动的全部服务。
+- macOS 安装依赖后也可双击 `启动游戏.command`。
+- 默认使用 8780–8789 端口。端口占用时启动器会报错，可以运行 `python start.py --port 18780` 换用另一组端口。
+- 只在本机试玩可加 `--bind 127.0.0.1`。局域网游玩需要允许入口端口的网络连接，并避免使用隔离设备的访客 Wi-Fi。
+- 游戏按局域网场景设计；游戏状态保留在服务进程中，《星港维修队》的已通关进度另存于 `.data/starport-progress.json`。
+
+## 星港维修队 · 手机玩法
+
+![手机横屏布局](docs/starport-mobile.png)
+
+- 默认近景跟随本机角色，右上角小地图显示伙伴和目标；点「全图」查看整个关卡。
+- 左侧移动，右侧跳跃和技能，可同时操作。横屏视野更宽，竖屏也支持。
+- 搬运员可磁吸、搬运货箱；侦察员可二段跳，并释放冻结无人机的时间脉冲。
+- 电脑支持 `A / D / W` 或方向键，`E / 空格` 使用技能。
+- iPhone Safari 中可使用浏览器内沉浸布局。要移除 Safari 地址栏：在游戏页点「分享 → 添加到主屏幕」，如出现「作为网页 App 打开」选项则开启，再从主屏幕图标启动。
+- 第一次从主屏幕启动时，建议先退出 Safari 页内的座位，再在网页 App 中接入。
+
+手机布局经过桌面浏览器尺寸模拟与输入逻辑检查；iPhone 实体机 Safari、主屏幕启动和各设备手感仍需实际体验验证。
+
+## 项目结构
+
+```text
+start.py             统一启动与关闭本次启动的子进程
+gateway.py          统一页面、发现接口与 WebSocket 路由
+apps/
+  main/              原六款游戏的页面、服务与规则测试
+  extra/             扩展六款游戏
+  cards/             三款纸牌
+  uno/               UNO 风格牌桌
+  starport/          星港维修队与手机视图
+scripts/check.py     完整检查入口
+tests/test_stack.py  隔离端口的整栈联机验证
+docs/                游戏预览图
+```
+
+所有游戏都从同一个入口进入：`/`、`/extra/`、`/cards/`、`/uno/`、`/starport/`。各后端仅监听本机回环地址，由统一入口转发连接。
+
+## 检查
+
+安装依赖后运行：
+
+```bash
+.venv/bin/python scripts/check.py
+```
+
+Windows 可将上面的 Python 路径替换为 `.venv\Scripts\python.exe`。
+
+检查包括规则与完整对局模拟、翻牌难度递进及隐藏信息、星港角色动作与手机视图、多客户端 WebSocket，以及统一入口下 17 款游戏的接入。整栈测试会使用独立端口并在结束后关闭自身启动的进程。GitHub Actions 也会运行相同检查。
+
+运行生成的日志、进程文件、依赖目录及玩家进度均由 `.gitignore` 排除。

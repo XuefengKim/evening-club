@@ -1,0 +1,1 @@
+{"name":"starport-crew","private":true,"type":"module","scripts":{"start":"node server.mjs","test":"node test.mjs && node test-view.mjs && node test-network.mjs"},"dependencies":{"ws":"^8.18.0"}}
