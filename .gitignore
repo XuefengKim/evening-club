@@ -6,8 +6,6 @@ __pycache__/
 .data/
 *.log
 *.pid
-progress.json
-progress.json.tmp
 .env
 .env.*
 !.env.example

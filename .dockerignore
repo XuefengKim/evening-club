@@ -10,4 +10,5 @@
 backups
 docs
 tests
+starport/test*.mjs
 *.zip

@@ -15,7 +15,7 @@ jobs:
         with:
           node-version: '22'
       - run: python -m pip install -r requirements.txt
-      - run: npm --prefix apps/starport ci
+      - run: npm --prefix starport ci
       - run: python scripts/check.py
       - name: Build cloud container
         run: docker build -t evening-club:ci .

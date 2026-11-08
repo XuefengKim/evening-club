@@ -1,0 +1,29 @@
+{
+  "id": "./",
+  "name": "星港维修队 · 双人协作冒险",
+  "short_name": "星港维修队",
+  "start_url": "./?launch=home",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": [
+    "fullscreen",
+    "standalone"
+  ],
+  "orientation": "any",
+  "background_color": "#101e27",
+  "theme_color": "#101e27",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
