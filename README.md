@@ -65,7 +65,13 @@ npm --prefix starport ci
 - macOS 安装依赖后也可双击 `启动游戏.command`。
 - `Ctrl+C` 会同时停止《星港维修队》的后台进程。
 
-## 部署到公网（Render）
+## 部署到公网
+
+当前网站：[lovecollection.online](https://lovecollection.online/)。2026-11-08 已部署到腾讯云上海轻量应用服务器，采用 **Nginx + systemd + Python / Node.js**，不依赖家里的电脑持续开机。
+
+[腾讯云部署与运维说明](docs/deployment-tencent.md) 包含运行结构、首次配置、手动更新、数据备份、回滚和访客身份说明；可复用配置在 [`deploy/tencent/`](deploy/tencent/)。GitHub 推送不会自动更新这台服务器。
+
+### Render 备用方案
 
 [一键部署到 Render](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2FXuefengKim%2Fevening-club)
 
