@@ -6,6 +6,7 @@ Node server because its physics engine is shared with the browser; it runs as a
 private child process on the loopback interface and `/ws/starport` is relayed to it.
 """
 import asyncio
+import json
 import os
 import shutil
 import socket
@@ -17,7 +18,7 @@ import aiohttp
 from aiohttp import web
 
 from . import table, uno_table
-from .registry import normalize, registry
+from .registry import CREATES, MISSES, TOO_MANY_MISSES, TOO_MANY_TABLES, client_address, normalize, registry
 from .static import SECURITY, Static
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,26 +46,48 @@ async def accept(request):
 
 
 async def table_socket(request):
-    return await table.session(await accept(request))
+    return await table.session(await accept(request), client_address(request))
 
 
 async def uno_socket(request):
-    return await uno_table.session(await accept(request))
+    return await uno_table.session(await accept(request), client_address(request))
+
+
+def gatekeep(text, address):
+    """Applies the shared per-address budgets to Starport create/join; returns an error to send instead, or None."""
+    if '"create"' not in text and '"join"' not in text:
+        return None
+    try:
+        kind = json.loads(text).get('type')
+    except (ValueError, AttributeError):
+        return None
+    if kind == 'create' and not CREATES.allow(address):
+        return TOO_MANY_TABLES
+    if kind == 'join' and MISSES.blocked(address):
+        return TOO_MANY_MISSES
+    return None
 
 
 async def starport_socket(request):
     client = await accept(request)
+    address = client_address(request)
     sidecar = request.app['starport']
     try:
         async with request.app['http'].ws_connect(f'ws://127.0.0.1:{sidecar.port}/', max_msg_size=MAX_MESSAGE) as upstream:
             async def downstream():
                 async for frame in upstream:
                     if frame.type == aiohttp.WSMsgType.TEXT:
+                        if '"missing"' in frame.data:
+                            MISSES.hit(address)
                         await client.send_str(frame.data)
             async def uplink():
                 async for frame in client:
                     if frame.type == aiohttp.WSMsgType.TEXT:
-                        await upstream.send_str(frame.data)
+                        refused = gatekeep(frame.data, address)
+                        if refused:
+                            await client.send_str(json.dumps({'type': 'error', 'message': refused}, ensure_ascii=False))
+                        else:
+                            await upstream.send_str(frame.data)
             tasks = [asyncio.create_task(downstream()), asyncio.create_task(uplink())]
             await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in tasks:
@@ -84,9 +107,12 @@ async def invite(request):
     """/r/CODE opens whichever page owns the room."""
     code = normalize(request.match_info['code'])
     if code.startswith('S'):
-        raise web.HTTPFound(f'/starport/?r={code}')
-    room = registry.get(code)
+        raise web.HTTPFound(f'/starport/?r={code}')  # the Starport join itself is budgeted
+    address = client_address(request)
+    room = None if MISSES.blocked(address) else registry.get(code)
     if room is None:
+        if code:
+            MISSES.hit(address)
         raise web.HTTPFound(f'/?missing={code}' if code else '/')
     raise web.HTTPFound(f'{room.page}?r={code}')
 
@@ -133,13 +159,22 @@ class Starport:
         raise RuntimeError('Starport server did not start within 60 seconds')
 
     async def supervise(self):
+        delay = 1
         while not self.stopping:
-            await self.process.wait()
-            if self.stopping:
-                return
-            print(f'Starport server exited ({self.process.returncode}); restarting', file=sys.stderr, flush=True)
-            await asyncio.sleep(1)
-            await self.spawn()
+            if self.alive():
+                await self.process.wait()
+                if self.stopping:
+                    return
+                print(f'Starport server exited ({self.process.returncode}); restarting', file=sys.stderr, flush=True)
+            await asyncio.sleep(delay)
+            try:
+                await self.spawn()
+                delay = 1
+            except Exception as exc:  # keep trying; /_health reports 503 meanwhile
+                print(f'Starport restart failed: {exc}; retrying in {delay}s', file=sys.stderr, flush=True)
+                if self.alive():
+                    self.process.kill()
+                delay = min(delay * 2, 30)
 
     async def start(self):
         await self.spawn()

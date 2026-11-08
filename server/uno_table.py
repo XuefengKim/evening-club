@@ -5,7 +5,7 @@ import time
 from aiohttp import WSMsgType
 
 from .games.uno import Game
-from .registry import Peer, Throttle, registry
+from .registry import CREATES, MISSES, TOO_MANY_MISSES, TOO_MANY_TABLES, Peer, Throttle, registry
 
 
 class UnoTable(Game):
@@ -15,6 +15,17 @@ class UnoTable(Game):
         super().__init__()
         self.code = code
         self.updated = time.monotonic()
+        self.settled = False
+
+    def add_human(self, name, ws):
+        pid = super().add_human(name, ws)
+        self.settled = self.settled or len(self.humans) == 2
+        return pid
+
+    def start(self, pid):
+        result = super().start(pid)
+        self.settled = True
+        return result
 
     def connected(self):
         return any(self.players[p]['ws'] is not None for p in self.humans)
@@ -48,7 +59,7 @@ SETTINGS = {
 }
 
 
-async def session(ws):
+async def session(ws, address):
     peer, limit = Peer(ws), Throttle()
     game, pid = None, None
     try:
@@ -60,13 +71,13 @@ async def session(ws):
                 act = m.get('type')
                 if pid is None:
                     if act == 'create':
+                        if not CREATES.allow(address): raise ValueError(TOO_MANY_TABLES)
                         candidate = UnoTable(registry.new_code())
                     elif act == 'join':
+                        if MISSES.blocked(address): raise ValueError(TOO_MANY_MISSES)
                         candidate = registry.get(m.get('room'))
                         if not isinstance(candidate, UnoTable):
-                            if not limit.missed_join():
-                                await ws.close(code=4008, message='Too many attempts'.encode())
-                                break
+                            MISSES.hit(address)
                             raise ValueError('没有找到这一桌，可能已经结束了。请让朋友重新发一次邀请链接')
                     else:
                         continue

@@ -7,7 +7,7 @@ import time
 from aiohttp import WSMsgType
 
 from .games import MATCHES
-from .registry import Peer, Throttle, registry
+from .registry import CREATES, MISSES, TOO_MANY_MISSES, TOO_MANY_TABLES, Peer, Throttle, registry
 
 KINDS = list(MATCHES)
 
@@ -30,6 +30,7 @@ class Room:
         self.completed = {kind: 0 for kind in KINDS}
         self.memory_mode = 'progressive'
         self.memory_progress = 0
+        self.settled = False  # two people sat down or a round was played: keep the link for the long idle window
 
     @property
     def active(self): return self.match is not None and not self.match.done
@@ -55,6 +56,7 @@ class Room:
         if self.active: raise ValueError('对方正在玩，等这局结束后就能加入')
         if len(self.players) >= 2: raise ValueError('两个人都已入座，请回到原页面继续')
         self.players.append({'name': str(name).strip()[:12] or '玩家', 'token': token, 'ws': ws, 'bot': False})
+        self.settled = self.settled or sum(not p['bot'] for p in self.players) == 2
         self.wins = [0, 0]
         self.completed = {kind: 0 for kind in KINDS}
         self.memory_progress = 0
@@ -115,6 +117,7 @@ class Room:
         self.host(seat)
         if len(self.players) != 2 or self.paused: raise ValueError('等朋友连接，或开启人机练习')
         self.match_id += 1
+        self.settled = True
         self.match = MATCHES[self.kind](self.kind, level=self.next_memory_level() if self.kind == 'memory' else 1)
 
     def state(self, seat):
@@ -168,7 +171,7 @@ def seat_token(msg):
     return token
 
 
-async def session(ws):
+async def session(ws, address):
     """One browser tab. First message is create or join; afterwards it acts on that room only."""
     peer, limit = Peer(ws), Throttle()
     room, seat = None, None
@@ -189,13 +192,13 @@ async def session(ws):
                     if action == 'create':
                         kind = msg.get('game', 'connect')
                         if kind not in MATCHES: raise ValueError('请选择已有游戏')
+                        if not CREATES.allow(address): raise ValueError(TOO_MANY_TABLES)
                         candidate = Room(registry.new_code(), kind)
                     else:
+                        if MISSES.blocked(address): raise ValueError(TOO_MANY_MISSES)
                         candidate = registry.get(msg.get('room'))
                         if not isinstance(candidate, Room):
-                            if not limit.missed_join():
-                                await ws.close(code=4008, message='Too many attempts'.encode())
-                                break
+                            MISSES.hit(address)
                             raise ValueError('没有找到这一桌，可能已经结束了。请让朋友重新发一次邀请链接')
                         if not candidate.member(token): candidate.make_room_for_guest()
                     seat = candidate.join(msg.get('name', '玩家'), token, peer)

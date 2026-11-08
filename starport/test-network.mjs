@@ -30,4 +30,10 @@ assert.equal(q.state().progress.unlocked,3);q.send({type:'select',level:3});awai
 q.send({type:'select',level:4});await sleep(100);assert.equal(q.state().game.level,3);
 const saved=JSON.parse(fs.readFileSync(progress));assert.equal(saved.players[ids.b],undefined);
 console.log('PASS per-player server progress: partner inherits higher unlock in the room, file survives restart, locked stages refused');
+// A progress file from the LAN version (one shared record) stays as a floor for every crew.
+fs.writeFileSync(progress,JSON.stringify({unlocked:5,best:{0:{stars:3,time:20,deaths:0}}}));
+for(const c of all)c.ws.terminate();all=[];child.kill();await sleep(150);await boot();
+const l=await client();l.send({type:'hello',player:ids.c});const hello=await l.wait(m=>m.type==='hello');assert.equal(hello.progress.unlocked,5);assert.equal(hello.room,null);
+l.send({type:'create',player:ids.c});await l.wait(m=>m.type==='joined');await sleep(80);assert.equal(l.state().progress.unlocked,5);assert.equal(l.state().progress.best[0].stars,3);
+console.log('PASS LAN-version progress file kept as a floor; welcome-screen hello returns own progress');
 }finally{for(const c of all)c.ws.terminate();child?.kill();try{fs.unlinkSync(progress);}catch{}try{fs.unlinkSync(progress+'.tmp');}catch{}}

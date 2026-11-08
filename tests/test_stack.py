@@ -12,6 +12,7 @@ import tempfile
 import time
 
 import aiohttp
+from yarl import URL
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -23,7 +24,8 @@ ASSETS = ['/favicon.svg', '/shared/club.css', '/shared/club.js', '/shared/catalo
           '/starport/client.mjs', '/starport/engine.mjs', '/starport/view.mjs', '/starport/style.css',
           '/starport/manifest.webmanifest', '/starport/icon-192.png', '/starport/icon-512.png']
 PRIVATE = ['/start.py', '/.env', '/server/app.py', '/starport/server.mjs', '/../requirements.txt', '/.data/starport-progress.json',
-           '/%2e%2e/start.py', '/play/nope', '/tests/test_stack.py']
+           '/%2e%2e/start.py', '/play/nope', '/tests/test_stack.py',
+           '/shared///club.css', '/shared/./club.css', '/shared/.//club.css']
 
 
 def free_port():
@@ -174,8 +176,8 @@ async def http_checks(http, base):
     async with http.get(base + '/starport/manifest.webmanifest') as r:
         manifest = await r.json(content_type=None)
         assert manifest['scope'] == './' and manifest['start_url'].startswith('./')
-    for route in PRIVATE:
-        async with http.get(base + route, allow_redirects=False) as r:
+    for route in PRIVATE:  # sent verbatim: the client must not tidy '//' or './' before the server sees them
+        async with http.get(URL(base + route, encoded=True), allow_redirects=False) as r:
             assert r.status == 404, (route, r.status)
     for route, target in [('/extra/', '/'), ('/cards/', '/'), ('/play', '/'), ('/uno', '/uno/'), ('/r/ZZZZ', '/?missing=ZZZZ'), ('/r/bad!', '/')]:
         async with http.get(base + route, allow_redirects=False) as r:
@@ -191,6 +193,43 @@ async def http_checks(http, base):
     print('PASS pages and assets on one origin, gzip + ETag, private paths hidden, legacy redirects, origin check')
 
 
+async def budgets(http, base):
+    """One address cannot fill the server with tables or brute-force room codes (runs last: it spends the budget)."""
+    refused = None
+    for _ in range(40):
+        c = await client(http, base, '/ws/table')
+        await c.send(type='create', game='connect', token='z' * 32, name='Z')
+        m = await c.receive(lambda m: m.get('type') in ('state', 'error'), allow_error=True)
+        await c.ws.close()
+        if m['type'] == 'error':
+            refused = m['message']
+            break
+    assert refused and '太多' in refused, refused
+    s = await client(http, base, '/ws/starport')
+    await s.send(type='create', player='z' * 32)
+    assert '太多' in (await s.receive(lambda m: m.get('type') == 'error', allow_error=True))['message']
+    await s.ws.close()
+    c = await client(http, base, '/ws/table')
+    for _ in range(40):
+        await c.send(type='join', room='ZZZZ', token='z' * 32, name='Z')
+        m = await c.receive(lambda m: m.get('type') == 'error', allow_error=True)
+        if '尝试次数太多' in m['message']:
+            break
+    else:
+        raise AssertionError('code guessing was never limited')
+    await c.ws.close()
+    print('PASS per-address budgets: table flood refused (tables and Starport), code guessing limited')
+
+
+async def hello(http, base):
+    s = await client(http, base, '/ws/starport')
+    await s.send(type='hello', player='a' * 32)
+    m = await s.receive(lambda m: m.get('type') == 'hello')
+    assert m['room'] is None and 'unlocked' in m['progress'] and m['game']['level'] == 0
+    await s.ws.close()
+    print('PASS Starport welcome screen gets this browser\'s progress before taking a seat')
+
+
 async def protocols(port):
     base = f'http://127.0.0.1:{port}'
     async with aiohttp.ClientSession() as http:
@@ -199,6 +238,8 @@ async def protocols(port):
         await isolation(http, base)
         await uno(http, base)
         await starport(http, base)
+        await hello(http, base)
+        await budgets(http, base)
 
 
 def main():

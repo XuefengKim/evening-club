@@ -10,3 +10,7 @@ services:
     envVars:
       - key: PORT
         value: "10000"
+      # Cloudflare overwrites this header on every request to a public Render web service;
+      # per-visitor limits use it. Verify after the first deploy (see README).
+      - key: CLIENT_IP_HEADER
+        value: CF-Connecting-IP

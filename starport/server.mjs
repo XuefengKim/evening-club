@@ -10,12 +10,14 @@ import {createGame,step,LEVELS,stars} from '../web/starport/engine.mjs';
 
 const root=path.dirname(fileURLToPath(import.meta.url)),port=Number(process.env.PORT||8900);
 const progressPath=process.env.PROGRESS_FILE||path.join(root,'..','.data','starport-progress.json');
-const ALPHABET='23456789ABCDEFGHJKLMNPQRSTUVWXYZ',MAX_ROOMS=500,SEAT_GRACE=300000;
+// A crew that played keeps a dropped seat for 5 minutes; a room nobody started is reclaimed after 2.
+const ALPHABET='23456789ABCDEFGHJKLMNPQRSTUVWXYZ',MAX_ROOMS=2000,SEAT_GRACE=300000,UNSTARTED_GRACE=120000;
 const ROLE_NAMES=['搬运员','侦察员'];
 
 // Progress belongs to each player's anonymous browser id, so both partners keep what they unlock.
+// Installs from the LAN version kept one shared {unlocked,best}; it stays as a floor for every crew on that install.
 let saved={players:{}};
-try{const p=JSON.parse(fs.readFileSync(progressPath));if(p&&typeof p.players==='object')saved={players:p.players};}catch{}
+try{const p=JSON.parse(fs.readFileSync(progressPath));if(p&&typeof p.players==='object')saved={players:p.players,legacy:p.legacy||null};else if(p&&Number.isInteger(p.unlocked))saved={players:{},legacy:{unlocked:p.unlocked,best:p.best||{}}};}catch{}
 let saveTimer=null;
 function save(){clearTimeout(saveTimer);saveTimer=setTimeout(()=>{fs.mkdirSync(path.dirname(progressPath),{recursive:true});fs.writeFileSync(progressPath+'.tmp',JSON.stringify(saved));fs.renameSync(progressPath+'.tmp',progressPath);},300);}
 const validPlayer=id=>typeof id==='string'&&/^[0-9a-f]{16,64}$/.test(id)?id:null;
@@ -23,7 +25,7 @@ function record(id){return saved.players[id]||{unlocked:0,best:{}};}
 const better=(a,b)=>!b||a.stars>b.stars||a.stars===b.stars&&a.time<b.time;
 function merged(room){
  const out={unlocked:0,best:{}};
- for(const s of room.seats){if(!s?.player)continue;const r=record(s.player);out.unlocked=Math.max(out.unlocked,Math.min(LEVELS.length-1,r.unlocked|0));for(const[k,v]of Object.entries(r.best||{}))if(better(v,out.best[k]))out.best[k]=v;}
+ for(const r of[saved.legacy,...room.seats.map(s=>s?.player?record(s.player):null)]){if(!r)continue;out.unlocked=Math.max(out.unlocked,Math.min(LEVELS.length-1,r.unlocked|0));for(const[k,v]of Object.entries(r.best||{}))if(better(v,out.best[k]))out.best[k]=v;}
  return out;
 }
 function credit(room){
@@ -34,7 +36,8 @@ function credit(room){
 
 const rooms=new Map();
 function newCode(){let code;do code='S'+Array.from({length:3},()=>ALPHABET[randomInt(ALPHABET.length)]).join('');while(rooms.has(code));return code;}
-function makeRoom(){const room={code:newCode(),game:createGame(),seats:[null,null],started:false,inputs:[{},{}],lastSeen:[0,0],version:0,tick:0};rooms.set(room.code,room);return room;}
+function makeRoom(){const room={code:newCode(),game:createGame(),seats:[null,null],started:false,played:false,inputs:[{},{}],lastSeen:[0,0],version:0,tick:0};rooms.set(room.code,room);return room;}
+function preview(player){const id=validPlayer(player);return{type:'hello',room:null,game:createGame(),progress:merged({seats:[id?{player:id}:null]}),seats:[null,null],started:false,paused:false,version:0};}
 const publicSeat=s=>s?{connected:!!s.ws,name:s.name}:null;
 const snapshot=room=>({type:'state',room:room.code,game:room.game,progress:merged(room),seats:room.seats.map(publicSeat),started:room.started,paused:!room.seats.every(s=>s?.ws),version:room.version});
 const send=(ws,data)=>{if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(data));};
@@ -60,6 +63,8 @@ wss.on('connection',(ws,req)=>{
  ws.on('message',raw=>{try{
   if(Date.now()-windowStart>1000){count=0;windowStart=Date.now();}if(++count>100)return;
   const m=JSON.parse(raw);
+  // Before taking a seat, a page may ask for this browser's own progress (stage map on the welcome screen).
+  if(m.type==='hello'){if(!seat())send(ws,preview(m.player));return;}
   if(m.type==='create'){
    if(seat())return;
    if(rooms.size>=MAX_ROOMS){send(ws,{type:'error',message:'现在开着的维修舱太多了，请稍后再试。'});return;}
@@ -77,7 +82,7 @@ wss.on('connection',(ws,req)=>{
   const mine=seat();if(!mine||mine.ws!==ws)return;
   const r=room;
   if(m.type==='input'){r.inputs[role]={left:m.left===true,right:m.right===true,jump:m.jump===true,action:m.action===true};r.lastSeen[role]=Date.now();}
-  if(m.type==='start'&&r.seats.every(s=>s?.ws)){r.started=true;broadcast(r);}
+  if(m.type==='start'&&r.seats.every(s=>s?.ws)){r.started=true;r.played=true;broadcast(r);}
   if(m.type==='restart'){r.game=createGame(r.game.level);r.inputs=[{},{}];r.version++;broadcast(r);}
   if(m.type==='select'&&Number.isInteger(m.level)&&m.level>=0&&m.level<=merged(r).unlocked&&m.level<LEVELS.length){r.game=createGame(m.level);r.started=r.seats.every(s=>s?.ws);r.version++;broadcast(r);}
   if(m.type==='next'&&r.game.won&&r.game.level<LEVELS.length-1){r.game=createGame(r.game.level+1);r.inputs=[{},{}];r.version++;broadcast(r);}
@@ -89,7 +94,7 @@ wss.on('connection',(ws,req)=>{
 setInterval(()=>{
  const now=Date.now();
  for(const room of rooms.values()){
-  for(let i=0;i<2;i++){const s=room.seats[i];if(now-room.lastSeen[i]>750)room.inputs[i]={};if(s&&!s.ws&&now-s.disconnectedAt>SEAT_GRACE){room.seats[i]=null;room.started=false;}}
+  for(let i=0;i<2;i++){const s=room.seats[i];if(now-room.lastSeen[i]>750)room.inputs[i]={};if(s&&!s.ws&&now-s.disconnectedAt>(room.played?SEAT_GRACE:UNSTARTED_GRACE)){room.seats[i]=null;room.started=false;}}
   if(room.seats.every(s=>!s)){rooms.delete(room.code);continue;}
   if(room.started&&room.seats.every(s=>s?.ws)&&!room.game.won){step(room.game,room.inputs);if(room.game.won){credit(room);room.version++;}}
   if(++room.tick%3===0)broadcast(room);

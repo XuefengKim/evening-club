@@ -23,13 +23,13 @@ class Static:
         self.root = Path(root).resolve()
         self.cache = {}
 
-    def files(self):
-        return sorted(p.relative_to(self.root).as_posix() for p in self.root.rglob('*')
-                      if p.is_file() and not any(part.startswith('.') for part in p.relative_to(self.root).parts))
-
     def load(self, relative):
+        # Only the canonical spelling of a real file is served (and cached): no '//', './', '..' or dotfiles.
+        parts = relative.split('/')
+        if not relative or any(part in ('', '.', '..') or part.startswith('.') for part in parts):
+            return None
         path = (self.root / relative).resolve()
-        if self.root not in path.parents or not path.is_file() or any(part.startswith('.') for part in Path(relative).parts):
+        if self.root not in path.parents or not path.is_file():
             return None
         stamp = path.stat().st_mtime_ns
         hit = self.cache.get(relative)
